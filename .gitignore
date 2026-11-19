@@ -4,6 +4,7 @@
 *.o
 /docs/build/
 *.pdf
+!build/*.pdf
 
 # temporary files (including Kalkylark's own save-in-progress files)
 *.tmp
