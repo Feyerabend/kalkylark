@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make CFLAGS="-std=c99 -pedantic -Wall -Wextra -O2"
+      - name: Test
+        run: make check
+
+  freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          run: make && make check
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tectonic
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://drop-sh.fullyjustified.net | sh
+          sudo mv tectonic /usr/local/bin/
+      - name: Build PDFs (screens are regenerated from the program)
+        run: make docs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kalkylark-docs
+          path: docs/build/*.pdf
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, docs]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: kalkylark-docs
+      - name: Attach PDFs to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.pdf"

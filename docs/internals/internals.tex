@@ -1,0 +1,501 @@
+% Kalkylark internals. Build: make docs   (tectonic)
+% Licensed CC BY 4.0.
+\documentclass[11pt]{article}
+\usepackage{kalkylark}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit}
+
+\tikzset{
+  mod/.style={draw=ink, fill=paperbox, rounded corners=2pt, align=center,
+    font=\sffamily\small, minimum width=26mm, minimum height=10mm},
+  ext/.style={draw=phdim, dashed, rounded corners=2pt, align=center,
+    font=\sffamily\small, minimum width=26mm, minimum height=9mm},
+  use/.style={-{Stealth[length=2mm]}, thick, color=ink},
+  cellnode/.style={draw=ink, fill=paperbox, minimum width=10mm,
+    minimum height=6mm, font=\sffamily\small, rounded corners=1pt},
+}
+\lstdefinestyle{c}{language=C, morekeywords={size_t,ssize_t},
+  keywordstyle=\bfseries, commentstyle=\itshape\color{phdim!70!black}}
+
+\title{\sffamily\bfseries\color{ink}Kalkylark internals\\[4pt]
+  \Large\mdseries A walk through the source}
+\author{\sffamily Set Lonnert and the Kalkylark authors}
+\date{\sffamily Version 0.1 · November 2026}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+\begin{abstract}
+\noindent Kalkylark is about 2\,800 lines of C99 in seven modules. This
+document explains how they work and why they are built the way they are:
+a terminal layer on bare \texttt{termios} and escape sequences, a parser
+that evaluates while it parses, three recalculation strategies, a number
+formatter, an entry editor with pointing, an atomic save, and the testing
+setup, which includes a pseudo-terminal harness that also produces the
+screens in the documentation. Code excerpts are abridged. The source is
+the authority.
+\end{abstract}
+
+\vspace{1em}
+\begin{center}
+\begin{tikzpicture}[node distance=9mm and 8mm, scale=0.9, transform shape]
+  \node[mod] (main) {main.c\\\scriptsize options, startup};
+  \node[mod, below=of main] (ui) {ui.c\\\scriptsize screen, entry, commands};
+  \node[mod, left=of ui] (theme) {theme.c\\\scriptsize phosphor colours};
+  \node[mod, below left=of ui, xshift=10mm] (term) {term.c\\\scriptsize keys, VT100 output};
+  \node[mod, below right=of ui, xshift=-10mm] (sheet) {sheet.c\\\scriptsize cells, recalc, formats};
+  \node[mod, below=of sheet] (formula) {formula.c\\\scriptsize parser, evaluator};
+  \node[mod, right=of sheet] (storage) {storage.c\\\scriptsize save, load};
+  \node[ext, below=of term] (tty) {terminal\\\scriptsize termios + escapes};
+  \node[ext, right=of storage, xshift=-6mm, yshift=-19mm] (file) {.kalk file};
+  \draw[use] (main) -- (ui);
+  \draw[use] (main) -| (theme);
+  \draw[use] (ui) -- (theme);
+  \draw[use] (ui) -- (term);
+  \draw[use] (ui) -- (sheet);
+  \draw[use] (ui) -| (storage);
+  \draw[use] (theme) |- (term);
+  \draw[use] ([xshift=-3mm]sheet.south) -- ([xshift=-3mm]formula.north);
+  \draw[use] ([xshift=3mm]formula.north) -- ([xshift=3mm]sheet.south);
+  \draw[use] (storage) -- (sheet);
+  \draw[use] (term) -- (tty);
+  \draw[use] (storage) |- (file);
+\end{tikzpicture}
+
+{\small\sffamily\color{ink}Modules and who calls whom. \texttt{sheet.c}
+and \texttt{formula.c} call each other: the sheet evaluates formulas, and
+formulas read cells.}
+\end{center}
+
+\newpage
+\tableofcontents
+\newpage
+
+% ======================================================================
+\section{Principles}
+
+\begin{description}[style=nextline, leftmargin=1.5em]
+\item[Portable by construction.] C99 plus POSIX.1-2008, and nothing else:
+  no curses, no libraries beyond \texttt{libm}. The code builds without a
+  warning with \texttt{-std=c99 -pedantic}, \texttt{-Wall -Wextra} and
+  \texttt{-Wconversion -Wshadow}.
+\item[The engine knows nothing about the screen.] \texttt{sheet.c},
+  \texttt{formula.c} and \texttt{storage.c} form the \emph{core}. They
+  never include a terminal header, and the tests link only the core.
+\item[Fixed-size where the original was.] VisiCalc's sheet had 63 columns
+  and 254 rows. A static array of 16\,002 cells is small (about 400\,KB),
+  needs no growth logic, and makes coordinates plain array indices.
+\item[Faithful first, then optional.] VisiCalc's behaviour is the default
+  (left-to-right formulas, one-pass recalculation). Later improvements,
+  such as natural order, are options.
+\end{description}
+
+% ======================================================================
+\section{The terminal layer: \texttt{term.c}}
+
+Curses solves terminal differences with the \texttt{terminfo} database.
+Today every terminal emulator understands the VT100/ECMA-48 escape
+sequences, so Kalkylark writes them directly and needs only \texttt{termios}
+for input.
+
+\subsection{Raw mode}
+
+By default a terminal is in \emph{canonical} mode: the kernel collects a
+whole line, echoes it, and turns \kbd{Ctrl-C} into a signal. A spreadsheet
+wants every key as it is pressed:
+
+\begin{lstlisting}[style=c]
+raw = orig_tio;
+raw.c_iflag &= ~(tcflag_t)(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+raw.c_oflag &= ~(tcflag_t)OPOST;     /* we position everything ourselves */
+raw.c_cflag |= CS8;
+raw.c_lflag &= ~(tcflag_t)(ECHO | ICANON | IEXTEN | ISIG);
+raw.c_cc[VMIN] = 1;                  /* read() returns after one byte  */
+raw.c_cc[VTIME] = 0;
+tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+\end{lstlisting}
+
+Turning off \texttt{ISIG} means \kbd{Ctrl-C} arrives as byte 3 and is
+handled as a key, and turning off \texttt{IXON} frees \kbd{Ctrl-S} and
+\kbd{Ctrl-Q}. The original settings are saved and restored by
+\texttt{term\_done()}. That function is registered with \texttt{atexit},
+called on \texttt{SIGTERM} and \texttt{SIGHUP}, and safe to call twice. A
+crash must never leave the user's shell in raw mode. On entry Kalkylark
+also switches to the \emph{alternate screen} (\texttt{ESC[?1049h}), so the
+shell's scrollback is untouched when it quits.
+
+\subsection{Decoding keys}
+
+Arrow and function keys arrive as escape sequences: \texttt{ESC [ A} for
+\up, \texttt{ESC [ 5 \textasciitilde} for \kbd{PgUp}, and so on. The
+difficulty is the \kbd{Esc} key itself, which sends a lone \texttt{ESC}.
+The decoder waits up to 50\,ms for a following byte, using
+\texttt{poll()}. If none comes, it was \kbd{Esc}:
+
+\begin{lstlisting}[style=c]
+c = read_byte(ESC_TIMEOUT_MS);       /* -1 on timeout */
+if (c < 0)
+    return KEY_ESC;
+if (c == '[' || c == 'O')
+    return decode_csi();             /* read up to a final byte 0x40..0x7e */
+\end{lstlisting}
+
+\texttt{decode\_csi()} collects parameter bytes until a \emph{final byte}
+in the range \texttt{0x40}--\texttt{0x7e}, as ECMA-48 defines it. As a
+result, modified keys such as \texttt{ESC[1;5C} (\kbd{Ctrl}+\rgt) are
+recognised as plain arrows instead of leaving stray characters behind.
+
+\subsection{Output and redrawing}
+
+All output goes into a 64\,KB buffer and leaves in a single
+\texttt{write()} per frame. The whole screen is redrawn after every key,
+which costs about 3\,KB at 80\,\(\times\)\,24 and avoids any bookkeeping
+about what changed. Because each line is overwritten in place and ended
+with \texttt{ESC[K} (erase to end of line), the screen never flickers.
+
+\subsection{Window size}
+
+\texttt{TIOCGWINSZ} gives the size. \texttt{SIGWINCH} is installed
+\emph{without} \texttt{SA\_RESTART}, so it interrupts the blocking
+\texttt{read()}. The key reader then returns \texttt{KEY\_RESIZE}, and the
+next frame is drawn at the new size.
+
+\begin{note}[Portability]
+\texttt{SIGWINCH} and \texttt{TIOCGWINSZ} are on every Unix but only
+entered POSIX in 2024, and macOS hides them in strict POSIX mode.
+\texttt{term.c} defines \texttt{\_DARWIN\_C\_SOURCE} on Apple systems and
+guards both with \texttt{\#ifdef}. A system without them falls back to
+\texttt{\$LINES}/\texttt{\$COLUMNS}, or 80\,\(\times\)\,24.
+\end{note}
+
+% ======================================================================
+\section{Colours: \texttt{theme.c}}
+
+The screen uses five \emph{roles}: normal, dim, bright, border and cursor.
+A theme turns each role into an SGR sequence (\texttt{ESC[...m}) once, at
+start-up, at the colour depth the terminal supports: 16 colours, the
+256-colour palette, or 24-bit \texttt{38;2;r;g;b}.
+
+A phosphor has a single hue at three intensities on a near-black
+background. The border and the cell cursor are not separate colours. They
+are \emph{reverse video} (SGR~7) of the dim and bright intensities, just as
+on a monochrome monitor:
+
+\begin{lstlisting}[style=c]
+snprintf(seq[ROLE_NORMAL], ..., "\033[0;%sm",   norm);
+snprintf(seq[ROLE_BORDER], ..., "\033[0;7;%sm", dim);
+snprintf(seq[ROLE_CURSOR], ..., "\033[0;7;%sm", bright);
+\end{lstlisting}
+
+The \texttt{plain} theme uses only bold and reverse video, so it works on
+any terminal and respects the user's own colour scheme. \texttt{NO\_COLOR}
+selects it unless \texttt{-p} is given.
+
+% ======================================================================
+\section{Cells: \texttt{sheet.c}}
+
+\begin{lstlisting}[style=c]
+struct val  { enum val_kind kind; double num; };     /* NUM, NA, ERR */
+struct cell {
+    enum cell_type type;    /* EMPTY, LABEL, VALUE */
+    char fmt;               /* display format, 0 = global */
+    char *text;             /* label text, or the formula as typed */
+    struct val v;           /* last computed value */
+};
+static struct cell cells[SHEET_ROWS][SHEET_COLS];
+\end{lstlisting}
+
+A value cell keeps its formula as \emph{text}, uppercased, plus the last
+computed value. There is no compiled form. Re-parsing at every
+recalculation is fast enough for 16\,002 cells, and it keeps one source of
+truth.
+
+\texttt{NA} and \texttt{ERR} are kinds of value, not numbers. Arithmetic
+propagates them, with \texttt{ERR} winning, and any non-finite result
+(division by zero, \texttt{@SQRT(-1)}, overflow) becomes \texttt{ERR}.
+
+Whether an entry is a label or a value is decided by its first character,
+as in VisiCalc: a digit or one of \texttt{+ - . ( @} makes a value, and a
+leading \texttt{"} forces a label.
+
+% ======================================================================
+\section{Formulas: \texttt{formula.c}}
+
+\subsection{Evaluate while parsing}
+
+The parser is recursive descent, and it computes values as it recognises
+them. There is no syntax tree:
+
+\begin{lstlisting}
+expr    := unary { op unary }        op: + - * / ^   (left to right)
+unary   := '-' unary | '+' unary | primary
+primary := number | ref | '(' expr ')' | '@' function
+\end{lstlisting}
+
+VisiCalc's lack of precedence makes the expression rule a single loop.
+That small loop is the whole reason \texttt{2+3*4} is 20:
+
+\begin{lstlisting}[style=c]
+static struct val parse_expr(struct parser *p)
+{
+    struct val a = parse_unary(p);
+    for (;;) {
+        skip(p);
+        int op = *p->s;
+        if (op == '\0' || strchr("+-*/^", op) == NULL || p->err)
+            return a;
+        p->s++;
+        a = binop(a, op, parse_unary(p));
+    }
+}
+\end{lstlisting}
+
+The usual way to add precedence is one function per level
+(\texttt{term}, \texttt{factor}, \texttt{power}). A \texttt{/G} option
+for it would be a small, self-contained change.
+
+\subsection{One parser, three uses}
+
+The same code runs in three modes, chosen by how \texttt{struct parser} is
+set up:
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+\texttt{formula\_check()} & syntax only: is the entry acceptable? Returns a
+  message and the column of the first error. \\
+\texttt{formula\_eval()} & the value, read from the cells' current values. \\
+\texttt{formula\_refs()} & every cell the formula may read, reported through
+  a callback. Natural-order recalculation builds its graph from this. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Errors are recorded once (\texttt{fail()} keeps the first) and parsing
+continues harmlessly. That keeps the code free of error checks at every
+call site.
+
+\subsection{References and ranges}
+
+A reference is one to three letters followed by one to four digits, and
+nothing alphanumeric after it. That is how \texttt{SUM} without an
+\texttt{@} is rejected rather than read as a cell. A range is a reference,
+then \texttt{.}, \texttt{..}, \texttt{...} or \texttt{:}, then another
+reference. Reversed corners are normalised. In \texttt{formula\_refs} mode
+a range reports every cell in it, and \texttt{@LOOKUP} also reports the
+column beside its range, because which cell the result comes from depends
+on the data.
+
+% ======================================================================
+\section{Recalculation}
+
+\subsection{The sweep}
+
+\begin{lstlisting}[style=c]
+for (c = 0; c < SHEET_COLS; c++)           /* /GOR swaps the loops */
+    for (r = 0; r < SHEET_ROWS; r++)
+        if (cells[r][c].type == CELL_VALUE)
+            cells[r][c].v = formula_eval(cells[r][c].text);
+\end{lstlisting}
+
+\subsection{Natural order with Kahn's algorithm}
+
+Lotus 1-2-3 is usually described with a recursive depth-first walk. A
+chain of 16\,002 formulas would then mean 16\,002 nested calls, each with
+the parser's frames on top, which is enough to overflow an 8\,MB stack.
+Kalkylark uses Kahn's algorithm instead, which is iterative:
+
+\begin{enumerate}[label=\arabic*.]
+\item \textbf{Edges.} For each formula cell \(x\), run
+  \texttt{formula\_refs} and record an edge \(p \to x\) for every formula
+  cell \(p\) that \(x\) reads. Cells holding plain numbers or labels need
+  no ordering and are skipped.
+\item \textbf{Compressed adjacency.} Count the dependents of each cell,
+  take prefix sums, and fill one array: the dependents of \(p\) are
+  \texttt{adj[first[p]..first[p+1])}. The in-degree of each cell is its
+  number of precedents.
+\item \textbf{Queue.} Put every formula with in-degree 0 in a queue, in
+  column order so the result is deterministic. Take one, compute it,
+  decrement each dependent's in-degree, and queue any that reach 0.
+\item \textbf{Leftovers are cycles.} Anything never queued is on a cycle
+  or downstream of one. Compute it in column order, VisiCalc style, and
+  set \texttt{sheet\_circular}.
+\end{enumerate}
+
+\begin{lstlisting}[style=c]
+while (head < tail) {
+    x = queue[head++];
+    evaluate(x);
+    done[x] = 1;
+    for (i = first[x]; i < first[x + 1]; i++)
+        if (--indeg[adj[i]] == 0)
+            queue[tail++] = adj[i];
+}
+\end{lstlisting}
+
+The graph is rebuilt on every recalculation, which costs a second parse
+of each formula. That is simple and always correct. The test that fills
+all 16\,002 cells with a single chain runs in a fraction of a second. If
+memory runs out, the code falls back to column order instead of failing.
+
+\begin{center}
+\begin{tikzpicture}[node distance=6mm and 14mm]
+  \node[cellnode] (a20) {A20};
+  \node[cellnode, right=of a20] (b5) {B5};
+  \node[cellnode, right=of b5] (c9) {C9};
+  \node[cellnode, right=of c9] (a1) {A1};
+  \draw[use] (a20) -- (b5);
+  \draw[use] (b5) -- (c9);
+  \draw[use] (c9) -- (a1);
+  \node[below=1mm of a20, font=\sffamily\scriptsize, color=ink] {3};
+  \node[below=1mm of b5,  font=\sffamily\scriptsize, color=ink] {+A20};
+  \node[below=1mm of c9,  font=\sffamily\scriptsize, color=ink] {+B5*10};
+  \node[below=1mm of a1,  font=\sffamily\scriptsize, color=ink] {+C9};
+\end{tikzpicture}
+
+{\small\sffamily\color{ink}A zig-zag chain from the tests: column order
+needs four passes, Kahn's algorithm one.}
+\end{center}
+
+% ======================================================================
+\section{Showing numbers}
+
+\texttt{format\_number()} implements the general format: the most precise
+form that fits in the column.
+
+\begin{enumerate}[label=\arabic*.]
+\item Try fixed point with 10, 9, \dots, 0 decimals, dropping trailing
+  zeros, and take the first that fits. Never accept a result that rounds a
+  non-zero number to \texttt{0}.
+\item Otherwise use scientific notation with as many digits as fit, in a
+  compact form: \texttt{1.2346e8}, not \texttt{1.2346e+08}.
+\item Otherwise fill the column with \texttt{>}.
+\end{enumerate}
+
+The other formats (\texttt{I}, \texttt{\$}, \texttt{*}) are a few lines
+each. \texttt{-0} and \texttt{-0.00} are normalised to \texttt{0} and
+\texttt{0.00}.
+
+% ======================================================================
+\section{The screen and the keyboard: \texttt{ui.c}}
+
+\subsection{One function draws everything}
+
+\texttt{draw()} rebuilds the status, prompt and entry lines, the border,
+and the visible part of the grid from the current state. It first scrolls
+so that the highlighted cell is visible. That cell is the cursor, or the
+pointer while pointing. Every interaction is a loop of \emph{draw, read a
+key, change state}. Nested prompts (\texttt{ask\_key}, \texttt{ask\_line})
+run their own loops and redraw on every key, including on window resize.
+
+\subsection{Entry and pointing}
+
+\texttt{cell\_entry()} is a small state machine around an edit buffer:
+
+\begin{center}
+\begin{tikzpicture}[node distance=8mm and 26mm,
+    st/.style={draw=ink, fill=paperbox, rounded corners=6pt,
+      font=\sffamily\small, minimum width=22mm, minimum height=8mm}]
+  \node[st] (typing) {typing};
+  \node[st, right=of typing] (pointing) {pointing};
+  \node[st, below=12mm of typing, xshift=24mm] (stored) {stored};
+  \draw[use] (typing) to[bend left=15] node[above, font=\sffamily\scriptsize, align=center]
+    {arrow after\\\texttt{+-*/\^{}(,.}} (pointing);
+  \draw[use] (pointing) to[bend left=15] node[below, font=\sffamily\scriptsize]
+    {any other key} (typing);
+  \draw[use] (pointing) to[loop right] node[right, font=\sffamily\scriptsize, align=left]
+    {arrow: move pointer,\\rewrite reference} (pointing);
+  \draw[use] (typing) -- node[left, font=\sffamily\scriptsize] {Enter / arrow} (stored);
+  \draw[use] (pointing) -- node[right, font=\sffamily\scriptsize] {Enter} (stored);
+\end{tikzpicture}
+\end{center}
+
+While pointing, the buffer position where the reference starts is
+remembered (\texttt{ref\_at}). Each arrow truncates the buffer there and
+appends the pointer's new coordinate. Typing \texttt{.} while pointing
+appends \texttt{...} and leaves pointing mode, so the next arrow starts the
+second corner of a range from where the pointer was. If the formula is
+rejected, the error stays on the prompt line and the entry remains open for
+editing.
+
+\subsection{Prompts with defaults}
+
+\texttt{ask\_line()} can start from a suggested value, such as the current
+file name or column width. Enter accepts it, the first typed character
+replaces it, and Backspace edits it. The column-width prompt originally
+appended to the suggestion, so typing \texttt{12} over \texttt{9} gave
+\texttt{912}. The end-to-end tests caught that.
+
+% ======================================================================
+\section{Files: \texttt{storage.c}}
+
+A sheet file is a list of records that could almost be typed in: global
+settings (\texttt{/GO}, \texttt{/GC}, \texttt{/GF}) and one line per
+non-empty cell, \texttt{>B3:/F\$:@SUM(B1...B2)}. Labels are always stored
+with their \texttt{"}, so loading can feed every cell through
+\texttt{sheet\_enter()}, the same function the keyboard uses. The loader
+then has no parsing of its own to get wrong, and a bad formula in a file is
+reported with its line number.
+
+Saving is atomic: write \emph{name}\texttt{.tmp}, check \texttt{ferror}
+and \texttt{fclose}, then \texttt{rename()} it over the target. POSIX
+guarantees that \texttt{rename} replaces the file in one step, so a full
+disk or a crash leaves the old file intact.
+
+% ======================================================================
+\section{Testing}
+
+\begin{description}[style=nextline, leftmargin=1.5em]
+\item[\texttt{make check}] builds \texttt{test\_core}, which links only the
+  core and checks about a hundred cases: arithmetic order, references,
+  every function, \texttt{NA}/\texttt{ERROR} propagation, syntax errors,
+  number formatting, every display format, a save/load round trip
+  (including a label containing \texttt{:} and \texttt{"}), and natural
+  order with zig-zag chains, ranges, \texttt{@LOOKUP}, cycles, and the
+  longest possible chain (all 16\,002 cells). It then loads every sheet in
+  \texttt{examples/} and fails if any cell shows \texttt{ERROR}. That check
+  found a real mistake in the loan example.
+\item[\texttt{tools/screens.py}] starts the real program in a
+  pseudo-terminal, sends keystrokes, and interprets the escape sequences it
+  writes, cursor positioning, erasing and SGR colours, into a character
+  grid with attributes. It writes LaTeX for the documentation, so every
+  screen in the tutorial is a test that the UI still behaves as described.
+  One subtlety: an escape sequence can be split across two reads, so the
+  interpreter keeps any incomplete tail for the next read.
+\item[CI] builds and tests on Linux, macOS and FreeBSD, and builds the
+  PDFs, on every push.
+\end{description}
+
+% ======================================================================
+\section{Where to extend}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+\textbf{Feature} & \textbf{Where and how} \\
+\midrule
+\texttt{/R} replicate & \texttt{ui.c} and a reference rewriter in
+  \texttt{formula.c}: copy a formula, shifting relative references (VisiCalc
+  asked ``No change / Relative'' for each one). \\
+\texttt{/I}, \texttt{/D} insert, delete & move rows/columns in
+  \texttt{sheet.c} and rewrite every reference that points past the
+  change, using the same rewriter. \\
+\texttt{/T} titles, \texttt{/W} windows & \texttt{ui.c}: frozen rows or
+  columns, and a split screen with two viewports. \\
+Column widths & per-column array in \texttt{sheet.c}. The file format
+  needs one more record type. \\
+Minimal recalculation & keep the graph from \texttt{recalc\_natural}
+  between recalculations, add dirty flags, and recompute only what is
+  reachable from the edited cell. \\
+Precedence option & a second expression grammar in \texttt{formula.c},
+  selected by a \texttt{/G} setting saved in the file. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\vfill
+{\small This document is licensed CC BY 4.0. Kalkylark is free software
+under the BSD 2-clause licence.}
+
+\end{document}

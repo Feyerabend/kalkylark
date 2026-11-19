@@ -1,0 +1,24 @@
+# kalkylark 1
+# A tax table with @LOOKUP: the thresholds in A must be ascending; the
+# rate is taken from the column to the right of the matching threshold.
+/GO N
+/GC 10
+/GF G
+>A1:"Over
+>B1:"Rate
+>A2:0
+>B2:0
+>A3:20000
+>B3:.1
+>A4:50000
+>B4:.2
+>A5:100000
+>B5:.3
+>D1:"Income
+>E1:65000
+>D2:"Rate
+>E2:@LOOKUP(E1,A2...A5)
+>D3:"Tax
+>E3:/F$:+E1*E2
+>D4:"Net
+>E4:/F$:+E1-E3

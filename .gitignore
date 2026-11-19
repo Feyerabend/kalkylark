@@ -1,0 +1,29 @@
+# build output
+/kalkylark
+/test_core
+*.o
+/docs/build/
+*.pdf
+
+# temporary files (including Kalkylark's own save-in-progress files)
+*.tmp
+*.swp
+*.swo
+*~
+\#*\#
+.#*
+
+# operating system clutter
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+# editors and tools
+.vscode/
+.idea/
+*.dSYM/
+.claude/
+__pycache__/

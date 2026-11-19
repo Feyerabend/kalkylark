@@ -1,0 +1,202 @@
+.TH KALKYLARK 1 "November 2026" "Kalkylark 0.1" "User Commands"
+.SH NAME
+kalkylark \- a VisiCalc-style spreadsheet for VT100 terminals
+.SH SYNOPSIS
+.B kalkylark
+.RB [ \-p
+.IR phosphor ]
+.RB [ \-c
+.IR colours ]
+.RI [ file ]
+.br
+.B kalkylark \-V
+.SH DESCRIPTION
+.B kalkylark
+is a small spreadsheet in the style of VisiCalc (1979).
+The sheet has 63 columns
+.RB ( A .. BK )
+and 254 rows.
+It needs only a VT100-compatible terminal; no curses library is used.
+.PP
+If
+.I file
+exists it is loaded; otherwise it becomes the name used by the first save.
+.SH OPTIONS
+.TP
+.BI \-p " phosphor"
+Colour theme:
+.BR plain " (default),"
+.BR green ", " amber " or " white ,
+after the monitor phosphors of the time.
+.TP
+.BI \-c " colours"
+Colour depth:
+.BR 16 ", " 256 " or " true .
+Normally detected from
+.B COLORTERM
+and
+.BR TERM .
+.TP
+.B \-V
+Print the version and exit.
+.SH SCREEN
+The top line shows the current cell, its format and its contents, and at
+the right the recalculation order and, after a circular reference,
+.BR CIRC .
+The second line holds prompts and messages, the third the text being typed.
+.SH ENTERING CELLS
+The first key decides the kind of entry: a digit or one of
+.B "+ \- . ( @"
+starts a
+.IR value ;
+anything else a
+.IR label .
+A leading
+.B \(dq
+forces a label.
+Enter stores the entry, an arrow key stores it and moves, Esc cancels.
+.PP
+While typing a value, after an operator,
+.B (
+or
+.BR , ,
+the arrow keys
+.I point
+at a cell and insert its coordinate; typing
+.B .
+while pointing turns it into a range such as
+.BR A1...A9 .
+.SH FORMULAS
+Operators
+.B "+ \- * / ^"
+are evaluated strictly from left to right, with no precedence, as in
+VisiCalc:
+.B 2+3*4
+is 20.
+Use parentheses.
+.PP
+References are written
+.BR A1 .. BK254 ;
+ranges
+.BR A1...A9 ,
+.BR A1.A9 ,
+.B A1..A9
+or
+.BR A1:A9 .
+Empty cells and labels count as 0.
+.PP
+Functions:
+.BR @SUM ", " @MIN ", " @MAX ", " @COUNT ", " @AVERAGE
+(lists of values and ranges),
+.BI @NPV( rate , range )\fR,\fP
+.BI @LOOKUP( x , range )\fR,\fP
+.BR @ABS ", " @INT ", " @SQRT ", " @EXP ", " @LN ", " @LOG10 ,
+.BR @SIN ", " @COS ", " @TAN ", " @ASIN ", " @ACOS ", " @ATAN ,
+.BR @PI ", " @NA ", " @ERROR .
+.B ERROR
+takes precedence over
+.BR NA ,
+and both propagate.
+.SH COMMANDS
+.TP
+.B Arrows, PgUp, PgDn, Home
+Move the cell cursor.
+.TP
+.B >
+Go to a coordinate.
+.TP
+.B !
+Recalculate.
+.TP
+.B /B
+Blank the current cell.
+.TP
+.B /C
+Clear the whole sheet.
+.TP
+.BI /F " f"
+Format the current cell:
+.B G
+general,
+.B I
+integer,
+.B $
+two decimals,
+.B L
+left,
+.B R
+right,
+.B *
+bar graph,
+.B D
+back to the global format.
+.TP
+.BI /GF " f"
+Set the global format.
+.TP
+.BI /GC " n"
+Set the column width (3 to 40) for all columns.
+.TP
+.BI /GO " o"
+Recalculation order:
+.B C
+by column (default) or
+.B R
+by row, one pass each, as in VisiCalc; or
+.B N
+natural order, as in Lotus 1-2-3, where each formula is computed after
+the formulas it reads.
+.TP
+.B /SS
+Save.
+.TP
+.B /SL
+Load.
+.TP
+.B /SQY
+Quit (asks again if there are unsaved changes).
+.TP
+.B Ctrl-L
+Redraw.
+.TP
+.B Ctrl-C
+Quit immediately.
+.SH FILES
+Sheets are plain text, one record per line:
+.PP
+.RS
+.nf
+# kalkylark 1
+/GO N
+/GC 9
+/GF G
+>A1:"Rent
+>B1:/F$:9500
+>B3:@SUM(B1...B2)
+.fi
+.RE
+.PP
+A save writes a temporary file and renames it over the old one.
+.SH ENVIRONMENT
+.TP
+.B KALKYLARK_PHOSPHOR
+Default theme for
+.BR \-p .
+.TP
+.B NO_COLOR
+If set and not empty, use the plain theme unless
+.B \-p
+is given.
+.TP
+.BR TERM ", " COLORTERM
+Used to detect the colour depth.
+.SH NOTES
+Kalkylark is an independent implementation written from scratch.
+It is not affiliated with, and contains no code from, Lotus Development
+Corporation, IBM, Software Arts or VisiCorp.
+VisiCalc is a trademark of its respective owner.
+.SH AUTHORS
+Set Lonnert and the Kalkylark authors.
+.SH SEE ALSO
+The Kalkylark tutorial, reference card, history and internals documents
+(docs/) in the source distribution.

@@ -1,0 +1,190 @@
+% Kalkylark reference card: one A4 landscape page, three columns.
+% Build: make docs   (tectonic). Licensed CC BY 4.0.
+\documentclass[10pt]{article}
+\PassOptionsToPackage{landscape}{geometry}
+\usepackage{kalkylark}
+\usepackage{multicol}
+\newgeometry{landscape, margin=11mm}
+\pagestyle{empty}
+\setlength{\columnsep}{9mm}
+\setlength{\columnseprule}{0.3pt}
+\renewcommand{\columnseprulecolor}{\color{phdim}}
+\setlength{\parskip}{2pt}
+
+% compact sections and two-column key tables
+\newcommand{\rc}[1]{\par\vspace{5pt}{\sffamily\bfseries\color{ink}#1}\par\vspace{1pt}}
+\newenvironment{keys}[1][22mm]
+  {\par\small\tabularx{\linewidth}{@{}>{\raggedright\arraybackslash}p{#1}>{\raggedright\arraybackslash}X@{}}}
+  {\endtabularx\par}
+\newcommand{\kt}[1]{\texttt{#1}}
+
+\begin{document}
+\raggedright
+\raggedcolumns
+\begin{multicols*}{3}
+
+{\sffamily\bfseries\Huge\color{ink}Kalkylark}\par
+{\sffamily\large\color{ink}Reference card · version 0.1}\par
+\vspace{4pt}
+{\small A VisiCalc-style spreadsheet for VT100 terminals.
+63 columns (\kt{A}--\kt{BK}) × 254 rows.}
+
+\rc{Starting}
+\begin{keys}[30mm]
+\kt{kalkylark} & empty sheet \\
+\kt{kalkylark f.kalk} & open or create \kt{f.kalk} \\
+\kt{-p green} & phosphor: \kt{plain}, \kt{green}, \kt{amber}, \kt{white} \\
+\kt{-c 256} & colours: \kt{16}, \kt{256}, \kt{true} \\
+\kt{-V} & version \\
+\end{keys}
+Environment: \kt{KALKYLARK\_PHOSPHOR}, \kt{NO\_COLOR}.
+
+\rc{The screen}
+\begin{center}
+\setlength{\fboxsep}{4pt}
+\colorbox{phbg}{\begin{minipage}{0.92\linewidth}\ttfamily\scriptsize
+\textcolor{phbright}{B3 /F\$ (V) @SUM(B1...B2)\hfill}\textcolor{phdim}{N KALKYLARK}\\
+\textcolor{phnorm}{prompt and messages}\\
+\textcolor{phbright}{entry being typed}\textcolor{phbright}{\rule{0.5em}{0.8em}}\\
+{\setlength{\fboxsep}{0pt}\colorbox{phdim}{\textcolor{phbg}{\strut\ \ \ \ \ \ \ \ \ A\ \ \ \ \ \ \ \ B\ \ \ \ \ \ \ \ C\ \ \ }}}
+\end{minipage}}
+\end{center}
+\vspace{-4pt}
+{\small Status line: cell, format, \textsf{(L)}abel or \textsf{(V)}alue,
+contents; at the right \textsf{CIRC} if there is a circular reference,
+then the recalculation order \textsf{C}/\textsf{R}/\textsf{N}.}
+
+\rc{Moving}
+\begin{keys}
+\up\ \down\ \lft\ \rgt & one cell \\
+\kbd{PgUp} \kbd{PgDn} & one screen \\
+\kbd{Home} & to \kt{A1} \\
+\kt{>}\emph{cell}\enter & go to, e.g. \kt{>BK254} \\
+\kbd{Ctrl-L} & redraw \\
+\end{keys}
+
+\rc{Entering}
+The \textbf{first key} decides:
+\begin{keys}
+\kt{0-9 + - . ( @} & starts a \textbf{value} \\
+anything else & starts a \textbf{label} \\
+\kt{"}\emph{text} & forces a label: \kt{"2026} \\
+\end{keys}
+\begin{keys}
+\enter & store \\
+arrow & store and move \\
+\kbd{Backspace} & delete a character \\
+\esc & cancel \\
+\end{keys}
+
+\rc{Pointing}
+After \kt{+ - * / \^{} ( ,} or \kt{.} the arrows move a \emph{pointer} and
+insert its coordinate. Typing \kt{.} while pointing writes \kt{...} and
+starts the range's second corner:\par
+\kt{@SUM(} \up\up\ \kt{.} \down\down\ \kt{)} \(\to\) \kt{@SUM(B1...B3)}
+
+\columnbreak
+
+\rc{Formulas}
+\textbf{Strictly left to right, no precedence:} \kt{2+3*4} = 20,
+\kt{2+(3*4)} = 14.
+\begin{keys}[24mm]
+\kt{+ - * /} & arithmetic; \kt{/0} gives \textsf{ERROR} \\
+\kt{\^{}} & power \\
+\kt{-x} & negation of the operand \\
+\kt{1.5E3} & scientific notation \\
+\kt{A1} & reference; blank and label = 0 \\
+\kt{A1...C9} & range; also \kt{A1.C9} \kt{A1..C9} \kt{A1:C9} \\
+\end{keys}
+A formula starting with a cell needs \kt{+}: \kt{+A1*2}.\par
+Careful: \kt{1-(1+r)\^{}n} means \((1-(1+r))^n\).
+Write \kt{1-((1+r)\^{}n)}.
+
+\rc{Functions}
+\begin{keys}[27mm]
+\kt{@SUM(list)} & sum \\
+\kt{@MIN(list)} \kt{@MAX} & smallest, largest \\
+\kt{@COUNT(list)} & number of values \\
+\kt{@AVERAGE(list)} & mean \\
+\kt{@NPV(r,range)} & \(\sum v_i/(1+r)^i\), \(i=1\dots\) \\
+\kt{@LOOKUP(x,range)} & last entry \(\le x\) in an ascending row or column;
+  result from the cell to its right (or below) \\
+\kt{@ABS @INT} & absolute value, integer part \\
+\kt{@SQRT @EXP} & square root, \(e^x\) \\
+\kt{@LN @LOG10} & logarithms \\
+\kt{@SIN @COS @TAN} & radians \\
+\kt{@ASIN @ACOS @ATAN} & inverses \\
+\kt{@PI} & \(\pi\) \\
+\kt{@NA} & ``not available'' \\
+\kt{@ERROR} & an error value \\
+\end{keys}
+A \emph{list} mixes values and ranges: \kt{@SUM(A1...A9,C1,100)}.
+In ranges, blanks and labels are skipped.
+\textsf{NA} and \textsf{ERROR} spread through formulas; \textsf{ERROR}
+wins.
+
+\rc{Formats}
+\begin{keys}[8mm]
+\kt{G} & general: as many digits as fit \\
+\kt{I} & integer, rounded \\
+\kt{\$} & two decimals \\
+\kt{L} & left-aligned \\
+\kt{R} & right-aligned (labels too) \\
+\kt{*} & bar graph: one \kt{*} per unit \\
+\kt{D} & default: use the global format \\
+\end{keys}
+\kt{>>>>} means the number does not fit: widen with \kt{/GC}.
+
+\columnbreak
+
+\rc{Commands}
+Type \kt{/}, then letters. \esc{} backs out.
+\begin{keys}[19mm]
+\kt{/B}\enter & blank the cell \\
+\kt{/C Y} & clear the sheet \\
+\kt{/F}\emph{f} & cell format (\kt{G I \$ L R * D}) \\
+\kt{/GF}\emph{f} & global format \\
+\kt{/GC}\emph{n}\enter & column width 3--40, all columns \\
+\kt{/GOC} & recalc by column (default) \\
+\kt{/GOR} & recalc by row \\
+\kt{/GON} & recalc in natural order \\
+\kt{/SS} & save \\
+\kt{/SL} & load \\
+\kt{/SQY} & quit \\
+\end{keys}
+In name and number prompts the suggested value is accepted with \enter,
+replaced by typing, and edited with \kbd{Backspace}.
+
+\rc{Recalculation}
+\begin{keys}
+\kt{!} & recalculate now \\
+\end{keys}
+\textbf{C} and \textbf{R} (VisiCalc): one pass in column or row order.
+A formula that refers forward may show an old value. Press \kt{!} again.\par
+\textbf{N} (Lotus 1-2-3): each formula after the ones it reads, so one
+recalculation is always enough. \textsf{CIRC} marks a circular reference;
+its cells move one step per \kt{!}.
+
+\rc{Files}
+Plain text, one record per line:
+\begin{lstlisting}[basicstyle=\ttfamily\footnotesize, frame=none,
+  xleftmargin=0pt, framexleftmargin=0pt]
+# kalkylark 1
+/GO N
+/GC 9
+/GF G
+>A1:"Rent
+>B1:/F$:9500
+>B3:@SUM(B1...B2)
+\end{lstlisting}
+Saves are atomic (temporary file, then rename). Kalkylark asks before
+overwriting, and before quitting or loading over unsaved changes.
+
+\vfill
+{\scriptsize\color{ink}Kalkylark is free software (BSD 2-clause) by Set
+Lonnert and the Kalkylark authors. This card: CC BY 4.0. Not affiliated
+with Lotus, IBM, Software Arts or VisiCorp. VisiCalc is a trademark of its
+respective owner.\par}
+
+\end{multicols*}
+\end{document}

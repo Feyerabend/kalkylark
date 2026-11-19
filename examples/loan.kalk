@@ -1,0 +1,36 @@
+# kalkylark 1
+# Monthly payment on a loan, and the net present value of an investment.
+# Operators run left to right, so the payment formula needs its parentheses.
+/GO N
+/GC 12
+/GF G
+>A1:"Loan
+>B1:/F$:200000
+>A2:"Rate/year
+>B2:.04
+>A3:"Years
+>B3:25
+>A5:"Rate/month
+>B5:+B2/12
+>A6:"Months
+>B6:+B3*12
+>A7:"Payment
+>B7:/F$:+B1*B5/(1-((1+B5)^(-B6)))
+>A8:"Total paid
+>B8:/F$:+B7*B6
+>A10:"Invest now
+>B10:/F$:-10000
+>A11:"Year 1
+>B11:/F$:3000
+>A12:"Year 2
+>B12:/F$:3000
+>A13:"Year 3
+>B13:/F$:3000
+>A14:"Year 4
+>B14:/F$:3000
+>A15:"Year 5
+>B15:/F$:3000
+>A17:"Discount
+>B17:.08
+>A18:"NPV
+>B18:/F$:@NPV(B17,B11...B15)+B10

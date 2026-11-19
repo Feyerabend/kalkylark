@@ -1,0 +1,13 @@
+# kalkylark 1
+# A deliberate circular reference: the fee is 10% of a total that
+# includes the fee. The status line shows CIRC; press ! a few times
+# and the numbers settle at 111.11 and 11.11.
+/GO N
+/GC 10
+/GF G
+>A1:"Price
+>B1:/F$:100
+>A2:"Fee 10%
+>B2:/F$:+B3*.1
+>A3:"Total
+>B3:/F$:+B1+B2

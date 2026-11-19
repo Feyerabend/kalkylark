@@ -1,0 +1,21 @@
+# kalkylark 1
+# A monthly household budget: labels, values, @SUM and a $ format.
+/GO N
+/GC 11
+/GF G
+>A1:"Budget
+>B1:"November
+>A3:"Rent
+>B3:/F$:9500
+>A4:"Food
+>B4:/F$:4200
+>A5:"Transport
+>B5:/F$:970
+>A6:"Other
+>B6:/F$:1500
+>A8:"Total
+>B8:/F$:@SUM(B3...B6)
+>A9:"Per day
+>B9:/F$:+B8/30
+>A10:"Largest
+>B10:/F$:@MAX(B3...B6)
