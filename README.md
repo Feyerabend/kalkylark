@@ -1,8 +1,12 @@
 # Kalkylark
 
 A VisiCalc-style spreadsheet for VT100 terminals, written from scratch in
-portable C. *Kalkylark* is Swedish for *spreadsheet*.
+portable C. *Kalkylark* is Swedish for *spreadsheet*. With the adoption of
+AI of today, the architecture becomes more important in understanding than
+the code itself. The historical traits can even enlighten us to understand
+historical constraints, but also solutions that were made under such.
 
+Let's see what the program looks like:
 ```
  B8 /F$ (V) @SUM(B3...B6)                         N  KALKYLARK
 
