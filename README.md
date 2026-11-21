@@ -49,7 +49,7 @@ Quit with `/SQY`. `man ./kalkylark.1` lists every key, command and function.
 
 ## Documentation
 
-| | |
+| Links | Description |
 |---|---|
 | [Tutorial](docs/tutorial/tutorial.tex) | from an empty sheet to worked examples, with screens generated from the program |
 | [Reference card](docs/refcard/refcard.tex) | every key, command, function and format on one page |
@@ -62,6 +62,8 @@ The PDFs are built with [tectonic](https://tectonic-typesetting.github.io):
 ```sh
 make docs             # -> docs/build/*.pdf
 ```
+
+Readymade [PDFs](./build).
 
 `make docs` first runs `tools/screens.py`, which starts Kalkylark in a
 pseudo-terminal, types into it, and turns what it draws into LaTeX. Every
