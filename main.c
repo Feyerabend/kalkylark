@@ -13,8 +13,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define VERSION "0.1"
-
 static void usage(FILE *f)
 {
     fprintf(f,
@@ -48,7 +46,7 @@ int main(int argc, char **argv)
             else { usage(stderr); return 2; }
             break;
         case 'V':
-            printf("kalkylark %s\n", VERSION);
+            printf("kalkylark %s\n", KALK_VERSION);
             return 0;
         case 'h':
             usage(stdout);

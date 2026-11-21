@@ -475,12 +475,10 @@ disk or a crash leaves the old file intact.
 \toprule
 \textbf{Feature} & \textbf{Where and how} \\
 \midrule
-\texttt{/R} replicate & \texttt{ui.c} and a reference rewriter in
-  \texttt{formula.c}: copy a formula, shifting relative references (VisiCalc
-  asked ``No change / Relative'' for each one). \\
-\texttt{/I}, \texttt{/D} insert, delete & move rows/columns in
-  \texttt{sheet.c} and rewrite every reference that points past the
-  change, using the same rewriter. \\
+\texttt{/R} replicate & \texttt{ui.c}, and a second use of the reference
+  rewriter behind \texttt{formula\_shift} in \texttt{formula.c}: copy a
+  formula, shifting relative references (VisiCalc asked ``No change /
+  Relative'' for each one). \\
 \texttt{/T} titles, \texttt{/W} windows & \texttt{ui.c}: frozen rows or
   columns, and a split screen with two viewports. \\
 Column widths & per-column array in \texttt{sheet.c}. The file format

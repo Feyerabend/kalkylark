@@ -4,6 +4,8 @@
 #ifndef KALK_UI_H
 #define KALK_UI_H
 
+#define KALK_VERSION "0.1"
+
 void ui_run(const char *path);  /* path: file to open, or NULL */
 
 #endif

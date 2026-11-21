@@ -238,6 +238,119 @@ static void natural_order(void)
     sheet_clear();
 }
 
+/* formula_shift(f, axis, at, n) should give want */
+static void shifted(const char *f, int axis, int at, int n, const char *want)
+{
+    char *got = formula_shift(f, axis, at, n);
+
+    total++;
+    if (got == NULL || strcmp(got, want) != 0) {
+        printf("FAIL  shift %-22s %c%+d at %d: want %s, got %s\n",
+               f, axis, n, at, want, got ? got : "(null)");
+        failures++;
+    }
+    free(got);
+}
+
+static int text_is(const char *coord, const char *want)
+{
+    const struct cell *c = at(coord);
+    return c->text != NULL && strcmp(c->text, want) == 0;
+}
+
+static void insert_delete(void)
+{
+    const char *msg;
+    int r;
+
+    /* the rewriter on its own: rows are 0-based, so row 3 is index 2 */
+    shifted("+A1+A5", 'R', 2, 1, "+A1+A6");
+    shifted("+A3", 'R', 2, 1, "+A4");           /* at the insert: moves */
+    shifted("+B2*2", 'C', 0, 1, "+C2*2");
+    shifted("@SUM(B3...B6)", 'R', 3, 1, "@SUM(B3...B7)");   /* grows */
+    shifted("@SUM(B3...B6)", 'R', 2, 1, "@SUM(B4...B7)");   /* moves */
+    shifted("@SUM(B3...B6)", 'R', 6, 1, "@SUM(B3...B6)");   /* unaffected */
+    shifted("@SUM(B6...B3)", 'R', 3, 1, "@SUM(B7...B3)");   /* reversed */
+    shifted("@SUM(B3:B6)", 'R', 3, 1, "@SUM(B3:B7)");       /* separator kept */
+    shifted("+A5", 'R', 2, -1, "+A4");
+    shifted("+A3+1", 'R', 2, -1, "+@ERROR+1");  /* deleted cell */
+    shifted("@SUM(B3...B6)", 'R', 3, -1, "@SUM(B3...B5)");  /* shrinks */
+    shifted("@SUM(B3...B6)", 'R', 2, -1, "@SUM(B3...B5)");  /* first deleted */
+    shifted("@SUM(B3...B6)", 'R', 5, -1, "@SUM(B3...B5)");  /* last deleted */
+    shifted("@SUM(B3...B3,1)", 'R', 2, -1, "@SUM(@ERROR,1)");
+    shifted("@NPV(.1,C3...C3)", 'R', 2, -1, "@ERROR");     /* needs a range */
+    shifted("+A254", 'R', 0, 1, "+@ERROR");     /* pushed off the sheet */
+    shifted("@SUM(A1...A254)", 'R', 0, 1, "@SUM(A2...A254)");
+    shifted("1E5+@LOG10(A2)", 'R', 0, 1, "1E5+@LOG10(A3)");
+    shifted("+A1+Z1+AA1", 'C', 25, 1, "+A1+AA1+AB1");
+
+    /* the sheet: insert a row inside a total */
+    sheet_clear();
+    sheet_order = 'N';
+    put("A1", "Rent");  put("B1", "100");
+    put("A2", "Food");  put("B2", "50");
+    put("B3", "@SUM(B1...B2)");
+    put("C3", "+B3*2");
+    sheet_set_format(1, 1, '$');
+    sheet_recalc();
+    check(sheet_insert('R', 1, &msg) == 0, "insert row 2");
+    sheet_recalc();
+    check(at("A2")->type == CELL_EMPTY && at("B2")->type == CELL_EMPTY
+          && at("B2")->fmt == 0, "insert: new row is empty");
+    check(text_is("A3", "Food") && numat("B3") == 50 && at("B3")->fmt == '$',
+          "insert: row moved down with its format");
+    check(text_is("B4", "@SUM(B1...B3)") && numat("B4") == 150, "insert: total grows");
+    check(text_is("C4", "+B4*2") && numat("C4") == 300, "insert: reference follows");
+    put("B2", "25");
+    sheet_recalc();
+    check(numat("B4") == 175, "insert: new row counts in the total");
+
+    /* and delete it again */
+    check(sheet_delete('R', 1, &msg) == 0, "delete row 2");
+    sheet_recalc();
+    check(text_is("A2", "Food") && text_is("B3", "@SUM(B1...B2)")
+          && numat("B3") == 150 && text_is("C3", "+B3*2"), "delete: back as before");
+    check(sheet_delete('R', 0, &msg) == 0, "delete row 1");
+    sheet_recalc();
+    check(text_is("B2", "@SUM(B1...B1)") && numat("B2") == 50, "delete: total shrinks");
+
+    /* columns */
+    sheet_clear();
+    put("A1", "1");
+    put("B1", "2");
+    put("C1", "+A1+B1");
+    sheet_recalc();
+    check(sheet_insert('C', 1, &msg) == 0, "insert column B");
+    sheet_recalc();
+    check(text_is("D1", "+A1+C1") && numat("D1") == 3, "insert column: references follow");
+    check(sheet_delete('C', 0, &msg) == 0, "delete column A");
+    sheet_recalc();
+    check(text_is("C1", "+@ERROR+B1") && at("C1")->v.kind == VAL_ERR,
+          "delete column: reference to it is ERROR");
+
+    /* insert refuses to push contents off the sheet */
+    sheet_clear();
+    put("A254", "1");
+    check(sheet_insert('R', 0, &msg) != 0, "insert refuses when row 254 is used");
+    check(numat("A254") == 1, "refused insert changes nothing");
+    put("BK1", "1");
+    check(sheet_insert('C', 0, &msg) != 0, "insert refuses when column BK is used");
+
+    /* the edges: delete the last row, insert before it */
+    sheet_clear();
+    put("A253", "7");
+    put("A1", "+A253");
+    check(sheet_insert('R', 252, &msg) == 0 && text_is("A254", "7")
+          && text_is("A1", "+A254"), "insert before row 253");
+    check(sheet_delete('R', SHEET_ROWS - 1, &msg) == 0
+          && at("A254")->type == CELL_EMPTY && text_is("A1", "+@ERROR"),
+          "delete the last row");
+    for (r = 0; r < 300; r++)               /* more deletes than rows */
+        sheet_delete('R', 0, &msg);
+    check(at("A1")->type == CELL_EMPTY, "repeated deletes empty the sheet");
+    sheet_clear();
+}
+
 /* Each sheet named on the command line must load, and no cell may show
  * ERROR after recalculation (used by `make check` for examples/). */
 static void check_example(const char *path)
@@ -394,6 +507,8 @@ int main(int argc, char **argv)
     roundtrip();
 
     natural_order();
+
+    insert_delete();
 
     for (i = 1; i < argc; i++)
         check_example(argv[i]);

@@ -142,16 +142,23 @@ Type \kt{/}, then letters. \esc{} backs out.
 \begin{keys}[19mm]
 \kt{/B}\enter & blank the cell \\
 \kt{/C Y} & clear the sheet \\
+\kt{/DR}\enter & delete row \\
+\kt{/DC}\enter & delete column \\
 \kt{/F}\emph{f} & cell format (\kt{G I \$ L R * D}) \\
 \kt{/GF}\emph{f} & global format \\
 \kt{/GC}\emph{n}\enter & column width 3--40, all columns \\
 \kt{/GOC} & recalc by column (default) \\
 \kt{/GOR} & recalc by row \\
 \kt{/GON} & recalc in natural order \\
+\kt{/IR} & insert row \\
+\kt{/IC} & insert column \\
 \kt{/SS} & save \\
 \kt{/SL} & load \\
 \kt{/SQY} & quit \\
+\kt{/V} & version \\
 \end{keys}
+Formulas follow their cells through \kt{/I} and \kt{/D}; a reference
+to a deleted cell becomes \kt{@ERROR}.
 In name and number prompts the suggested value is accepted with \enter,
 replaced by typing, and edited with \kbd{Backspace}.
 

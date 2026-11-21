@@ -147,6 +147,105 @@ void sheet_clear(void)
     sheet_dirty = 1;
 }
 
+/* ---- inserting and deleting rows and columns ------------------------- */
+
+static int is_row(int axis) { return axis == 'R'; }
+
+/* Is row or column i free of contents? */
+static int line_empty(int axis, int i)
+{
+    int k, n = is_row(axis) ? SHEET_COLS : SHEET_ROWS;
+
+    for (k = 0; k < n; k++)
+        if ((is_row(axis) ? cells[i][k] : cells[k][i]).type != CELL_EMPTY)
+            return 0;
+    return 1;
+}
+
+/* Rewrite every formula for the change, all or nothing: if memory runs
+ * out, no formula is touched. */
+static int shift_formulas(int axis, int at, int n)
+{
+    static char *shifted[SHEET_ROWS][SHEET_COLS];
+    int r, c, ok = 1;
+
+    for (r = 0; r < SHEET_ROWS; r++)
+        for (c = 0; c < SHEET_COLS; c++) {
+            shifted[r][c] = NULL;
+            if (ok && cells[r][c].type == CELL_VALUE
+                && (shifted[r][c] = formula_shift(cells[r][c].text, axis, at, n)) == NULL)
+                ok = 0;
+        }
+    for (r = 0; r < SHEET_ROWS; r++)
+        for (c = 0; c < SHEET_COLS; c++) {
+            if (shifted[r][c] == NULL)
+                continue;
+            if (ok) {
+                free(cells[r][c].text);
+                cells[r][c].text = shifted[r][c];
+            } else {
+                free(shifted[r][c]);
+            }
+        }
+    return ok ? 0 : -1;
+}
+
+int sheet_insert(int axis, int at, const char **msg)
+{
+    int r;
+
+    if (!line_empty(axis, is_row(axis) ? SHEET_ROWS - 1 : SHEET_COLS - 1)) {
+        *msg = is_row(axis) ? "the last row (254) is not empty"
+                            : "the last column (BK) is not empty";
+        return -1;
+    }
+    if (shift_formulas(axis, at, 1) < 0) {
+        *msg = "out of memory";
+        return -1;
+    }
+    if (is_row(axis)) {
+        memmove(&cells[at + 1], &cells[at],
+                (size_t)(SHEET_ROWS - 1 - at) * sizeof cells[0]);
+        memset(&cells[at], 0, sizeof cells[0]);
+    } else {
+        for (r = 0; r < SHEET_ROWS; r++) {
+            memmove(&cells[r][at + 1], &cells[r][at],
+                    (size_t)(SHEET_COLS - 1 - at) * sizeof cells[r][0]);
+            memset(&cells[r][at], 0, sizeof cells[r][0]);
+        }
+    }
+    sheet_dirty = 1;
+    return 0;
+}
+
+int sheet_delete(int axis, int at, const char **msg)
+{
+    int r, c;
+
+    if (shift_formulas(axis, at, -1) < 0) {
+        *msg = "out of memory";
+        return -1;
+    }
+    if (is_row(axis)) {
+        for (c = 0; c < SHEET_COLS; c++)
+            free(cells[at][c].text);
+        memmove(&cells[at], &cells[at + 1],
+                (size_t)(SHEET_ROWS - 1 - at) * sizeof cells[0]);
+        memset(&cells[SHEET_ROWS - 1], 0, sizeof cells[0]);
+    } else {
+        for (r = 0; r < SHEET_ROWS; r++) {
+            free(cells[r][at].text);
+            memmove(&cells[r][at], &cells[r][at + 1],
+                    (size_t)(SHEET_COLS - 1 - at) * sizeof cells[r][0]);
+            memset(&cells[r][SHEET_COLS - 1], 0, sizeof cells[r][0]);
+        }
+    }
+    sheet_dirty = 1;
+    return 0;
+}
+
+/* ---- recalculation -------------------------------------------------- */
+
 static void recalc_cell(int r, int c)
 {
     if (cells[r][c].type == CELL_VALUE)

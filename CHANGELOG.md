@@ -13,6 +13,9 @@ First public version.
 - Recalculation in column or row order (VisiCalc) or natural order
   (Lotus 1-2-3), with circular-reference detection (`CIRC`).
 - Formats `/F` and `/GF` (G I $ L R *), global column width `/GC`.
+- `/IR` `/IC` insert and `/DR` `/DC` delete a row or column; formulas are
+  rewritten to follow their cells, ranges grow and shrink, and a reference
+  to a deleted cell becomes `@ERROR`. `/V` shows the version.
 - Plain-text files: `/SS`, `/SL`, file name on the command line.
 - Man page, example sheets, and two LaTeX documents built with tectonic:
   a tutorial and a history of spreadsheet recalculation.

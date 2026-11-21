@@ -58,6 +58,15 @@ int sheet_enter(int row, int col, const char *input, const char **msg, int *pos)
 void sheet_blank(int row, int col);
 void sheet_clear(void);
 
+/* Insert an empty row (axis 'R') or column ('C') before index at, or
+ * delete the one at index at, as VisiCalc's /I and /D. Formulas are
+ * rewritten so they still read the same cells (see formula_shift).
+ * Insert refuses if the last row or column has contents, which would be
+ * pushed off the sheet. Return 0, or -1 with a message. The caller
+ * recalculates. */
+int sheet_insert(int axis, int at, const char **msg);
+int sheet_delete(int axis, int at, const char **msg);
+
 /* Recalculate every formula.
  *   'C', 'R'  one pass in column or row order, exactly like VisiCalc:
  *             forward references may need another pass ('!').

@@ -14,6 +14,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,6 +25,7 @@ struct parser {
     const char *err_at;
     formula_ref_fn on_ref;  /* if set: report every cell the formula reads */
     void *ctx;
+    struct shift *sh;       /* if set: rewrite references (formula_shift) */
 };
 
 struct range { int r1, c1, r2, c2; };
@@ -39,6 +41,124 @@ static void report_range(struct parser *p, int r1, int c1, int r2, int c2)
     for (r = r1; r <= r2; r++)
         for (c = c1; c <= c2; c++)
             p->on_ref(r, c, p->ctx);
+}
+
+/* ---- rewriting references for inserted or deleted rows/columns -------- */
+
+/*
+ * The parser reports where each reference is written in the source, and
+ * the rewriter copies the formula through, replacing only the references
+ * that move. Going through the parser means numbers such as 1E5 and
+ * function names such as @LOG10 are never mistaken for cells.
+ */
+struct shift {
+    int axis, at, n;        /* as for formula_shift */
+    const char *copied;     /* source copied to out up to here */
+    char *out;
+    size_t len;
+    int lost;               /* a reference pointed into deleted cells */
+};
+
+static void sh_copy(struct shift *sh, const char *upto)
+{
+    size_t k = (size_t)(upto - sh->copied);
+
+    memcpy(sh->out + sh->len, sh->copied, k);
+    sh->len += k;
+    sh->copied = upto;
+}
+
+static void sh_put(struct shift *sh, const char *s)
+{
+    size_t k = strlen(s);
+
+    memcpy(sh->out + sh->len, s, k);
+    sh->len += k;
+}
+
+static void sh_put_ref(struct shift *sh, int r, int c)
+{
+    char b[16], name[4];
+
+    snprintf(b, sizeof b, "%s%d", col_name(c, name), r + 1);
+    sh_put(sh, b);
+}
+
+static int sh_limit(const struct shift *sh)
+{
+    return sh->axis == 'R' ? SHEET_ROWS : SHEET_COLS;
+}
+
+/* Where index i goes: -1 if it was deleted; >= sh_limit if pushed off. */
+static int sh_map(const struct shift *sh, int i)
+{
+    if (i < sh->at)
+        return i;
+    if (sh->n > 0)
+        return i + sh->n;
+    if (i < sh->at - sh->n)
+        return -1;
+    return i + sh->n;
+}
+
+/* A single reference, written at [a, b). */
+static void shift_ref(struct parser *p, const char *a, const char *b, int r, int c)
+{
+    struct shift *sh = p->sh;
+    int *i = sh->axis == 'R' ? &r : &c, m = sh_map(sh, *i);
+
+    if (m == *i)
+        return;
+    sh_copy(sh, a);
+    if (m < 0 || m >= sh_limit(sh)) {
+        sh_put(sh, "@ERROR");
+        sh->lost = 1;
+    } else {
+        *i = m;
+        sh_put_ref(sh, r, c);
+    }
+    sh->copied = b;
+}
+
+/* A range, its two corners written at [a1, b1) and [a2, b2). Deleting
+ * cells inside it shrinks it, inserting inside it grows it; only when
+ * every cell is deleted does it become @ERROR. */
+static void shift_range(struct parser *p,
+                        const char *a1, const char *b1, int r1, int c1,
+                        const char *a2, const char *b2, int r2, int c2)
+{
+    struct shift *sh = p->sh;
+    int *i1 = sh->axis == 'R' ? &r1 : &c1, *i2 = sh->axis == 'R' ? &r2 : &c2;
+    int lo = *i1 < *i2 ? *i1 : *i2, hi = *i1 < *i2 ? *i2 : *i1;
+    int nlo = sh_map(sh, lo), nhi = sh_map(sh, hi), lim = sh_limit(sh);
+
+    if (nlo < 0)
+        nlo = sh->at;           /* first cells deleted: start after the gap */
+    if (nhi < 0)
+        nhi = sh->at - 1;       /* last cells deleted: end before the gap */
+    if (nhi >= lim)
+        nhi = lim - 1;          /* pushed off the edge: stop at the edge */
+    if (nlo == lo && nhi == hi)
+        return;
+    sh_copy(sh, a1);
+    if (nlo > nhi || nlo >= lim) {
+        sh_put(sh, "@ERROR");
+        sh->lost = 1;
+        sh->copied = b2;
+        return;
+    }
+    if (*i1 <= *i2) {
+        *i1 = nlo;
+        *i2 = nhi;
+    } else {
+        *i1 = nhi;
+        *i2 = nlo;
+    }
+    sh_put_ref(sh, r1, c1);
+    sh->copied = b1;
+    sh_copy(sh, a2);            /* the dots between the corners */
+    sh_put_ref(sh, r2, c2);
+    sh->copied = b2;
 }
 
 /* ---- values ---------------------------------------------------------- */
@@ -161,13 +281,14 @@ static int parse_ref(struct parser *p, int *row, int *col)
 /* ref (...|..|.|:) ref. Leaves p unchanged if this isn't a range. */
 static int parse_range(struct parser *p, struct range *rg)
 {
-    const char *save;
+    const char *save, *end1, *start2;
     int dots = 0, t;
 
     skip(p);
     save = p->s;
     if (!parse_ref(p, &rg->r1, &rg->c1))
         return 0;
+    end1 = p->s;
     skip(p);
     if (*p->s == ':') {
         p->s++;
@@ -182,10 +303,13 @@ static int parse_range(struct parser *p, struct range *rg)
         }
     }
     skip(p);
+    start2 = p->s;
     if (!parse_ref(p, &rg->r2, &rg->c2)) {
         fail(p, "expected a cell after the range dots");
         rg->r2 = rg->r1;
         rg->c2 = rg->c1;
+    } else if (p->sh) {
+        shift_range(p, save, end1, rg->r1, rg->c1, start2, p->s, rg->r2, rg->c2);
     }
     if (rg->r1 > rg->r2) { t = rg->r1; rg->r1 = rg->r2; rg->r2 = t; }
     if (rg->c1 > rg->c2) { t = rg->c1; rg->c1 = rg->c2; rg->c2 = t; }
@@ -427,7 +551,10 @@ static struct val parse_primary(struct parser *p)
         return parse_function(p);
     }
     if (isalpha((unsigned char)*p->s)) {
+        const char *a = p->s;
         if (parse_ref(p, &r, &c)) {
+            if (p->sh)
+                shift_ref(p, a, p->s, r, c);
             report_range(p, r, c, r, c);
             return cell_val(r, c);
         }
@@ -492,6 +619,7 @@ int formula_check(const char *s, const char **msg, int *pos)
     struct parser p;
 
     p.on_ref = NULL;
+    p.sh = NULL;
     run(s, &p);
     if (p.err == NULL)
         return 0;
@@ -505,6 +633,7 @@ struct val formula_eval(const char *s)
     struct parser p;
 
     p.on_ref = NULL;
+    p.sh = NULL;
     return run(s, &p);
 }
 
@@ -513,6 +642,37 @@ void formula_refs(const char *s, formula_ref_fn fn, void *ctx)
     struct parser p;
 
     p.on_ref = fn;
+    p.sh = NULL;
     p.ctx = ctx;
     run(s, &p);
+}
+
+char *formula_shift(const char *s, int axis, int at, int n)
+{
+    struct parser p;
+    struct shift sh;
+    const char *msg;
+    int pos;
+    size_t len = strlen(s);
+
+    /* a reference is at least 2 characters, its replacement at most 6
+     * ("BK254", "@ERROR"), so 3 times the length is always enough */
+    sh.out = malloc(3 * len + 8);
+    if (sh.out == NULL)
+        return NULL;
+    sh.axis = axis;
+    sh.at = at;
+    sh.n = n;
+    sh.copied = s;
+    sh.len = 0;
+    sh.lost = 0;
+    p.on_ref = NULL;
+    p.sh = &sh;
+    run(s, &p);
+    sh_copy(&sh, s + len);
+    sh.out[sh.len] = '\0';
+    /* @ERROR where @NPV or @LOOKUP need a range: the whole formula is lost */
+    if (sh.lost && formula_check(sh.out, &msg, &pos) < 0)
+        strcpy(sh.out, "@ERROR");
+    return sh.out;
 }

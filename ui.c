@@ -520,6 +520,40 @@ static void cmd_global(void)
     }
 }
 
+/* /I and /D: insert or delete the row or column at the cursor. Formulas
+ * elsewhere are rewritten to follow the cells they read. */
+static void cmd_rowcol(int del)
+{
+    char m[80], name[4];
+    const char *err;
+    int k = ask_key(del ? "Delete: R (row) C (column)"
+                        : "Insert: R (row) C (column)");
+    int at, rc;
+
+    if (k != 'R' && k != 'C') {
+        if (!is_cancel(k))
+            set_msg("Error: type R or C");
+        return;
+    }
+    at = k == 'R' ? cur_row : cur_col;
+    if (del) {
+        if (k == 'R')
+            snprintf(m, sizeof m, "Delete row %d: Hit ENTER to confirm", cur_row + 1);
+        else
+            snprintf(m, sizeof m, "Delete column %s: Hit ENTER to confirm",
+                     col_name(cur_col, name));
+        if (ask_key(m) != KEY_ENTER)
+            return;
+    }
+    rc = del ? sheet_delete(k, at, &err) : sheet_insert(k, at, &err);
+    if (rc < 0) {
+        snprintf(m, sizeof m, "Error: %s", err);
+        set_msg(m);
+        return;
+    }
+    sheet_recalc();
+}
+
 /* The slash-command tree. Returns 1 to quit. */
 static int cmd_slash(void)
 {
@@ -528,6 +562,7 @@ static int cmd_slash(void)
     switch (k) {
     case KEY_ESC:
     case KEY_BACKSPACE:
+    case KEY_CTRL('c'):
         break;
     case 'B':
         if (ask_key("Blank: Hit ENTER to blank this cell") == KEY_ENTER) {
@@ -541,11 +576,17 @@ static int cmd_slash(void)
             cur_row = cur_col = top_row = left_col = 0;
         }
         break;
+    case 'D':
+        cmd_rowcol(1);
+        break;
     case 'F':
         cmd_format(0);
         break;
     case 'G':
         cmd_global();
+        break;
+    case 'I':
+        cmd_rowcol(0);
         break;
     case 'S':
         k = ask_key("Storage: L (load) S (save) Q (quit)");
@@ -558,6 +599,10 @@ static int cmd_slash(void)
                                        : "Quit: Type Y to confirm") == 'Y';
         else if (!is_cancel(k))
             set_msg("Not implemented yet");
+        break;
+    case 'V':
+        set_msg("Kalkylark " KALK_VERSION
+                "  (c) Set Lonnert and the Kalkylark authors");
         break;
     default:
         set_msg("Not implemented yet");

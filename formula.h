@@ -24,4 +24,11 @@ struct val formula_eval(const char *s);
 typedef void (*formula_ref_fn)(int row, int col, void *ctx);
 void formula_refs(const char *s, formula_ref_fn fn, void *ctx);
 
+/* The formula rewritten for rows (axis 'R') or columns ('C') inserted or
+ * deleted: n > 0 inserts n before index at, n < 0 deletes -n from at on.
+ * References past the change move with their cells; a range grows or
+ * shrinks; a reference to a deleted cell becomes @ERROR. Returns a new
+ * string to free, or NULL if out of memory. */
+char *formula_shift(const char *s, int axis, int at, int n);
+
 #endif

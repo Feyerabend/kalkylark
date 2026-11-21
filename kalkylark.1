@@ -114,6 +114,10 @@ Blank the current cell.
 .B /C
 Clear the whole sheet.
 .TP
+.BR /DR ", " /DC
+Delete the row or column at the cursor (Enter confirms).
+The rows below or columns to the right move up or left.
+.TP
 .BI /F " f"
 Format the current cell:
 .B G
@@ -147,6 +151,26 @@ by row, one pass each, as in VisiCalc; or
 natural order, as in Lotus 1-2-3, where each formula is computed after
 the formulas it reads.
 .TP
+.BR /IR ", " /IC
+Insert an empty row or column at the cursor, moving the rest down or
+right.
+Refused if the last row (254) or column
+.RB ( BK )
+is not empty.
+.PP
+.RS
+After
+.B /I
+and
+.BR /D ,
+every formula still reads the same cells: references move with their
+cells, and a range such as
+.B B3...B6
+grows when a row is inserted inside it and shrinks when one is deleted.
+A reference to a deleted cell becomes
+.BR @ERROR .
+.RE
+.TP
 .B /SS
 Save.
 .TP
@@ -155,6 +179,9 @@ Load.
 .TP
 .B /SQY
 Quit (asks again if there are unsaved changes).
+.TP
+.B /V
+Show the version.
 .TP
 .B Ctrl-L
 Redraw.
